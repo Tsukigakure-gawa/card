@@ -8,13 +8,15 @@ type BattleViewProps = {
   winner?: string
 }
 
+const statusIcon: Record<string, string> = {
+  burn: '🔥',
+  poison: '☠️',
+  stun: '💫',
+  taunt: '🛡️',
+}
+
 const UnitCard = ({ unit, actorId, targetId }: { unit: BattleStateSnapshot['left']['units'][number]; actorId?: string; targetId?: string }) => {
-  const className = [
-    'unit-card',
-    unit.alive ? '' : 'dead',
-    actorId === unit.id ? 'active-actor' : '',
-    targetId === unit.id ? 'active-target' : '',
-  ]
+  const className = ['unit-card', unit.alive ? '' : 'dead', actorId === unit.id ? 'active-actor' : '', targetId === unit.id ? 'active-target' : '']
     .filter(Boolean)
     .join(' ')
 
@@ -27,17 +29,21 @@ const UnitCard = ({ unit, actorId, targetId }: { unit: BattleStateSnapshot['left
       <div>HP: {Math.max(unit.currentHp, 0)}/{unit.maxHp}</div>
       <div>Shield: {unit.shield}</div>
       <div>AP: {unit.actionPoints}/{unit.maxActionPoints}</div>
-      <div>
-        {unit.classResourceType ? `${unit.classResourceType === 'mana' ? 'Mana' : 'Spirit'}: ${unit.classResource}/${unit.maxClassResource}` : 'Class: -'}
-      </div>
+      <div>{unit.classResourceType ? `${unit.classResourceType === 'mana' ? 'Mana' : 'Spirit'}: ${unit.classResource}/${unit.maxClassResource}` : 'Class: -'}</div>
       <div className="status-row">
-        {unit.statusEffects.length > 0
-          ? unit.statusEffects.map((status, idx) => (
-              <span key={`${status.type}-${idx}`} className="status-badge">
-                {status.type}({status.duration})
-              </span>
-            ))
-          : <span className="muted">无状态</span>}
+        {unit.statusEffects.length > 0 ? (
+          unit.statusEffects.map((status, idx) => (
+            <span
+              key={`${status.type}-${idx}`}
+              className={`status-badge status-${status.type}`}
+              title={`${status.type} 持续 ${status.duration} 回合, 强度 ${status.value}`}
+            >
+              {statusIcon[status.type] ?? '•'} {status.duration}
+            </span>
+          ))
+        ) : (
+          <span className="muted">无状态</span>
+        )}
       </div>
     </div>
   )

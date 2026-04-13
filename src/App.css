@@ -208,3 +208,45 @@ button:disabled {
     min-width: 300px;
   }
 }
+
+
+.event-list {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 0;
+  list-style: none;
+}
+
+.event-tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  font-size: 12px;
+  margin-right: 0.35rem;
+}
+
+.event-neutral { background: #334155; }
+.event-damage { background: #7f1d1d; }
+.event-heal { background: #166534; }
+.event-status { background: #3730a3; }
+.event-resource { background: #92400e; }
+
+.resource-hint {
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.15);
+  animation: pulseHint 1s ease-in-out;
+}
+
+@keyframes pulseHint {
+  0% { transform: scale(0.98); opacity: 0.5; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.status-badge.status-burn { border-color: #f97316; }
+.status-badge.status-poison { border-color: #22c55e; }
+.status-badge.status-stun { border-color: #a855f7; }
+.status-badge.status-taunt { border-color: #38bdf8; }
