@@ -1,14 +1,48 @@
 #root {
-  max-width: 860px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 1rem;
   font-family: sans-serif;
 }
 
-h1 {
-  margin-bottom: 0.5rem;
+section {
+  border: 1px solid #ddd;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  background: #fff;
 }
 
-ol {
-  line-height: 1.5;
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.teams-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.team-panel {
+  border: 1px solid #ececec;
+  padding: 0.5rem;
+}
+
+.unit-card {
+  border-top: 1px dashed #ddd;
+  padding-top: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border: 1px solid #ccc;
+  padding: 0.25rem;
+  text-align: left;
 }

@@ -1,18 +1,28 @@
-import type { BattleResult } from '../engine/types'
+import type { BattleEvent } from '../engine/types'
 
 type BattleLogPanelProps = {
-  result: BattleResult
+  logs: string[]
+  events: BattleEvent[]
+  step: number
 }
 
-export const BattleLogPanel = ({ result }: BattleLogPanelProps) => {
+export const BattleLogPanel = ({ logs, events, step }: BattleLogPanelProps) => {
+  const visibleLogs = logs.slice(0, step + 1)
+  const visibleEvents = events.slice(0, step + 1)
+
   return (
     <section>
-      <h1>自动对战卡牌原型</h1>
-      <p>
-        胜利方：<strong>{result.winner}</strong>（{result.rounds} 回合）
-      </p>
+      <h2>日志 / 事件</h2>
+      <p>当前日志条目：{visibleLogs.length}</p>
+      <ul>
+        {visibleEvents.slice(-5).map((event) => (
+          <li key={event.stepIndex}>
+            #{event.stepIndex} {event.type}
+          </li>
+        ))}
+      </ul>
       <ol>
-        {result.logs.map((log, index) => (
+        {visibleLogs.slice(-20).map((log, index) => (
           <li key={`${index}-${log}`}>{log}</li>
         ))}
       </ol>
