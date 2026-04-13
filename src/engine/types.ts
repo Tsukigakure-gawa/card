@@ -1,9 +1,16 @@
 export type CardTargetType = 'self' | 'enemy_front' | 'enemy_lowest_hp'
 export type StatusEffectType = 'burn' | 'poison' | 'stun' | 'taunt'
+export type BattlePhase = 'turn_start' | 'before_action' | 'action' | 'after_action' | 'turn_end'
 
 export type StatusEffect = {
   type: StatusEffectType
   value: number
+  duration: number
+  sourceUnitId?: string
+}
+
+export type ImmunityEffect = {
+  immuneTo: StatusEffectType[]
   duration: number
   sourceUnitId?: string
 }
@@ -20,6 +27,16 @@ export type CardEffect =
       value: number
       duration: number
       targetType: CardTargetType
+    }
+  | {
+      kind: 'cleanse' | 'dispel'
+      targetType: CardTargetType
+    }
+  | {
+      kind: 'apply_immunity'
+      targetType: CardTargetType
+      duration: number
+      immuneTo: StatusEffectType[]
     }
 
 export type CardConfig = {
@@ -59,6 +76,7 @@ export type UnitStateSnapshot = {
   shield: number
   alive: boolean
   statusEffects: StatusEffect[]
+  immunities: ImmunityEffect[]
 }
 
 export type TeamStateSnapshot = {
@@ -85,6 +103,7 @@ export type BattleStateSnapshot = {
 
 export type BattleEventType =
   | 'battle_start'
+  | 'phase_start'
   | 'turn_start'
   | 'draw_card'
   | 'recycle_discard'
@@ -98,16 +117,34 @@ export type BattleEventType =
   | 'remove_status'
   | 'heal'
   | 'skip_turn'
+  | 'cleanse'
+  | 'dispel'
+  | 'apply_immunity'
+  | 'block_status'
   | 'unit_down'
   | 'battle_end'
 
 export type BattleEvent = {
   type: BattleEventType
   stepIndex: number
+  phase?: BattlePhase
   actorId?: string
   targetId?: string
   cardId?: string
   payload?: Record<string, number | string | boolean>
+}
+
+export type BattleReportUnitStats = {
+  unitId: string
+  dealtDamage: number
+  takenDamage: number
+  healingReceived: number
+  statusesApplied: number
+  statusDamageTriggers: number
+}
+
+export type BattleReport = {
+  units: Record<string, BattleReportUnitStats>
 }
 
 export type BattleResult = {
@@ -117,4 +154,5 @@ export type BattleResult = {
   events: BattleEvent[]
   finalState: BattleStateSnapshot
   history: BattleStateSnapshot[]
+  battleReport: BattleReport
 }
