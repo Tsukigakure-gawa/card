@@ -1,12 +1,31 @@
-export type CardType = 'damage' | 'shield'
 export type CardTargetType = 'self' | 'enemy_front' | 'enemy_lowest_hp'
+export type StatusEffectType = 'burn' | 'poison' | 'stun' | 'taunt'
+
+export type StatusEffect = {
+  type: StatusEffectType
+  value: number
+  duration: number
+  sourceUnitId?: string
+}
+
+export type CardEffect =
+  | {
+      kind: 'damage' | 'shield' | 'heal'
+      value: number
+      targetType: CardTargetType
+    }
+  | {
+      kind: 'apply_status'
+      statusType: StatusEffectType
+      value: number
+      duration: number
+      targetType: CardTargetType
+    }
 
 export type CardConfig = {
   id: string
   name: string
-  type: CardType
-  value: number
-  targetType: CardTargetType
+  effects: CardEffect[]
 }
 
 export type UnitConfig = {
@@ -39,6 +58,7 @@ export type UnitStateSnapshot = {
   speed: number
   shield: number
   alive: boolean
+  statusEffects: StatusEffect[]
 }
 
 export type TeamStateSnapshot = {
@@ -69,9 +89,15 @@ export type BattleEventType =
   | 'draw_card'
   | 'recycle_discard'
   | 'play_card'
+  | 'discard_card'
   | 'basic_attack'
   | 'gain_shield'
   | 'deal_damage'
+  | 'apply_status'
+  | 'tick_status'
+  | 'remove_status'
+  | 'heal'
+  | 'skip_turn'
   | 'unit_down'
   | 'battle_end'
 

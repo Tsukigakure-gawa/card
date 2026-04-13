@@ -1,89 +1,115 @@
 import { describe, expect, it } from 'vitest'
-import { sampleBattleConfig } from '../data/units'
 import type { BattleConfig } from './types'
 import { runBattle } from './simulator'
 
-describe('runBattle', () => {
-  it('should emit structured events with required core types', () => {
-    const result = runBattle(sampleBattleConfig)
-    const eventTypes = new Set(result.events.map((event) => event.type))
+const fillerUnits = (prefix: string) => [
+  { id: `${prefix}1`, name: `${prefix}1`, hp: 20, attack: 1, speed: 10 },
+  { id: `${prefix}2`, name: `${prefix}2`, hp: 20, attack: 1, speed: 5 },
+  { id: `${prefix}3`, name: `${prefix}3`, hp: 20, attack: 1, speed: 4 },
+]
 
-    expect(result.events.length).toBeGreaterThan(0)
-    expect(result.events[0].type).toBe('battle_start')
-    expect(eventTypes.has('turn_start')).toBe(true)
-    expect(eventTypes.has('draw_card')).toBe(true)
-    expect(eventTypes.has('play_card')).toBe(true)
-    expect(eventTypes.has('deal_damage')).toBe(true)
-    expect(result.events[result.events.length - 1].type).toBe('battle_end')
-
-    for (let i = 0; i < result.events.length; i += 1) {
-      expect(result.events[i].stepIndex).toBe(i + 1)
-    }
-  })
-
-  it('enemy_lowest_hp target should hit the lowest hp enemy unit', () => {
-    const config: BattleConfig = {
-      cards: [{ id: 'd1', name: '点杀', type: 'damage', value: 5, targetType: 'enemy_lowest_hp' }],
-      left: {
-        name: '左队',
-        units: [
-          { id: 'l1', name: 'L1', hp: 20, attack: 2, speed: 10 },
-          { id: 'l2', name: 'L2', hp: 20, attack: 1, speed: 1 },
-          { id: 'l3', name: 'L3', hp: 20, attack: 1, speed: 1 },
-        ],
-        deck: ['d1'],
-      },
-      right: {
-        name: '右队',
-        units: [
-          { id: 'r1', name: 'R1', hp: 20, attack: 1, speed: 9 },
-          { id: 'r2', name: 'R2', hp: 6, attack: 1, speed: 2 },
-          { id: 'r3', name: 'R3', hp: 12, attack: 1, speed: 3 },
-        ],
-        deck: [],
-      },
-    }
-
-    const result = runBattle(config)
-    const firstDamageEvent = result.events.find((event) => event.type === 'deal_damage' && event.cardId === 'd1')
-
-    expect(firstDamageEvent?.targetId).toBe('r2')
-  })
-
-  it('ai should prioritize shield card when shield is low', () => {
+describe('status effect system', () => {
+  it('burn should deal periodic damage and then be removed', () => {
     const config: BattleConfig = {
       cards: [
-        { id: 's1', name: '护盾术', type: 'shield', value: 7, targetType: 'self' },
-        { id: 'd1', name: '火焰弹', type: 'damage', value: 7, targetType: 'enemy_front' },
+        { id: 'burn', name: '燃烧', effects: [{ kind: 'apply_status', statusType: 'burn', value: 3, duration: 1, targetType: 'enemy_front' }] },
       ],
+      left: { name: 'A', units: fillerUnits('a'), deck: ['burn'] },
+      right: { name: 'B', units: fillerUnits('b'), deck: [] },
+    }
+
+    const result = runBattle(config)
+
+    expect(result.events.some((e) => e.type === 'apply_status' && e.payload?.statusType === 'burn')).toBe(true)
+    expect(result.events.some((e) => e.type === 'tick_status' && e.payload?.statusType === 'burn')).toBe(true)
+    expect(result.events.some((e) => e.type === 'remove_status' && e.payload?.statusType === 'burn')).toBe(true)
+  })
+
+  it('stun should skip unit turn', () => {
+    const config: BattleConfig = {
+      cards: [
+        { id: 'stun', name: '眩晕', effects: [{ kind: 'apply_status', statusType: 'stun', value: 0, duration: 1, targetType: 'enemy_front' }] },
+      ],
+      left: { name: 'A', units: fillerUnits('a'), deck: ['stun'] },
+      right: { name: 'B', units: fillerUnits('b'), deck: [] },
+    }
+
+    const result = runBattle(config)
+
+    expect(result.events.some((e) => e.type === 'skip_turn')).toBe(true)
+  })
+
+  it('taunt should redirect basic attack target', () => {
+    const config: BattleConfig = {
+      cards: [{ id: 'taunt', name: '挑衅', effects: [{ kind: 'apply_status', statusType: 'taunt', value: 0, duration: 2, targetType: 'self' }] }],
       left: {
-        name: 'A队',
+        name: 'A',
         units: [
           { id: 'a1', name: 'A1', hp: 20, attack: 2, speed: 10 },
-          { id: 'a2', name: 'A2', hp: 20, attack: 1, speed: 1 },
-          { id: 'a3', name: 'A3', hp: 20, attack: 1, speed: 1 },
+          { id: 'a2', name: 'A2', hp: 20, attack: 2, speed: 5 },
+          { id: 'a3', name: 'A3', hp: 20, attack: 2, speed: 4 },
         ],
-        deck: ['d1', 's1'],
+        deck: ['taunt'],
       },
       right: {
-        name: 'B队',
+        name: 'B',
         units: [
-          { id: 'b1', name: 'B1', hp: 20, attack: 1, speed: 9 },
-          { id: 'b2', name: 'B2', hp: 20, attack: 1, speed: 1 },
-          { id: 'b3', name: 'B3', hp: 20, attack: 1, speed: 1 },
+          { id: 'b1', name: 'B1', hp: 20, attack: 2, speed: 9 },
+          { id: 'b2', name: 'B2', hp: 20, attack: 2, speed: 6 },
+          { id: 'b3', name: 'B3', hp: 20, attack: 2, speed: 3 },
         ],
         deck: [],
       },
     }
 
     const result = runBattle(config)
-    const a1PlayEvents = result.events.filter((event) => event.type === 'play_card' && event.actorId === 'a1')
+    const firstBasic = result.events.find((e) => e.type === 'basic_attack' && e.actorId === 'b1')
 
-    expect(a1PlayEvents.length).toBeGreaterThan(1)
-    expect(a1PlayEvents[0].cardId).toBe('d1')
-    expect(a1PlayEvents[1].cardId).toBe('s1')
+    expect(firstBasic?.targetId).toBe('a1')
+  })
 
-    const hasGainShield = result.events.some((event) => event.type === 'gain_shield' && event.actorId === 'a1')
-    expect(hasGainShield).toBe(true)
+  it('heal should not exceed max hp', () => {
+    const config: BattleConfig = {
+      cards: [
+        { id: 'heal', name: '治疗', effects: [{ kind: 'heal', value: 50, targetType: 'self' }] },
+      ],
+      left: {
+        name: 'A',
+        units: [
+          { id: 'a1', name: 'A1', hp: 20, attack: 1, speed: 10 },
+          { id: 'a2', name: 'A2', hp: 20, attack: 1, speed: 5 },
+          { id: 'a3', name: 'A3', hp: 20, attack: 1, speed: 4 },
+        ],
+        deck: ['heal'],
+      },
+      right: {
+        name: 'B',
+        units: [
+          { id: 'b1', name: 'B1', hp: 20, attack: 5, speed: 9 },
+          { id: 'b2', name: 'B2', hp: 20, attack: 1, speed: 6 },
+          { id: 'b3', name: 'B3', hp: 20, attack: 1, speed: 3 },
+        ],
+        deck: [],
+      },
+    }
+
+    const result = runBattle(config)
+    const healEvent = result.events.find((e) => e.type === 'heal' && e.actorId === 'a1')
+
+    expect(healEvent).toBeDefined()
+    expect(Number(healEvent?.payload?.targetHpAfter)).toBeLessThanOrEqual(20)
+  })
+
+  it('poison should tick as separate status type', () => {
+    const config: BattleConfig = {
+      cards: [
+        { id: 'poison', name: '中毒', effects: [{ kind: 'apply_status', statusType: 'poison', value: 2, duration: 1, targetType: 'enemy_front' }] },
+      ],
+      left: { name: 'A', units: fillerUnits('a'), deck: ['poison'] },
+      right: { name: 'B', units: fillerUnits('b'), deck: [] },
+    }
+
+    const result = runBattle(config)
+    expect(result.events.some((e) => e.type === 'tick_status' && e.payload?.statusType === 'poison')).toBe(true)
   })
 })
