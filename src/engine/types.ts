@@ -27,8 +27,44 @@ export type BattleConfig = {
   cards: CardConfig[]
 }
 
+export type UnitStateSnapshot = {
+  id: string
+  name: string
+  team: string
+  currentHp: number
+  maxHp: number
+  attack: number
+  speed: number
+  shield: number
+  alive: boolean
+}
+
+export type TeamStateSnapshot = {
+  name: string
+  units: UnitStateSnapshot[]
+  drawPile: string[]
+  hand: string[]
+  discardPile: string[]
+}
+
+export type TurnInfo = {
+  round: number
+  actorTeam: string
+  actorUnitId: string
+  actorUnitName: string
+}
+
+export type BattleStateSnapshot = {
+  left: TeamStateSnapshot
+  right: TeamStateSnapshot
+  turn: TurnInfo | null
+  logs: string[]
+}
+
 export type BattleResult = {
   winner: string
   rounds: number
   logs: string[]
+  finalState: BattleStateSnapshot
+  history: BattleStateSnapshot[]
 }
