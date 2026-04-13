@@ -18,6 +18,7 @@ function App() {
   const [tab, setTab] = useState<'library' | 'characters' | 'battle'>('library')
   const [professionFilter, setProfessionFilter] = useState<Profession | 'all'>('all')
   const [selectedPresetId, setSelectedPresetId] = useState(battlePresets[0].id)
+  const [theme, setTheme] = useState<'nebula' | 'ember'>('nebula')
   const [leftCharacters, setLeftCharacters] = useState<UnitConfig[]>(clone(battlePresets[0].leftTeam))
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null)
   const [step, setStep] = useState(0)
@@ -66,8 +67,18 @@ function App() {
   const isEnded = battleResult ? step >= maxStep : false
 
   return (
-    <main>
+    <main className={`theme-${theme}`}>
       <h1>3v3 职业卡牌战斗原型</h1>
+
+
+      <section className="panel">
+        <h2>视觉方案</h2>
+        <p className="muted">可切换两套配色：星界霓虹（nebula）/ 熔岩战场（ember）。</p>
+        <div className="controls">
+          <button className={theme === 'nebula' ? 'active' : ''} onClick={() => setTheme('nebula')}>Nebula</button>
+          <button className={theme === 'ember' ? 'active' : ''} onClick={() => setTheme('ember')}>Ember</button>
+        </div>
+      </section>
 
       <div className="tab-bar">
         <button className={tab === 'library' ? 'active' : ''} onClick={() => setTab('library')}>牌库页</button>
