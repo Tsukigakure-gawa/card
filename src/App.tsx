@@ -70,29 +70,25 @@ function App() {
       <h1>3v3 职业卡牌战斗原型</h1>
 
       <div className="tab-bar">
-        <button onClick={() => setTab('library')}>牌库页</button>
-        <button onClick={() => setTab('characters')}>角色页</button>
-        <button onClick={() => setTab('battle')}>战斗页</button>
+        <button className={tab === 'library' ? 'active' : ''} onClick={() => setTab('library')}>牌库页</button>
+        <button className={tab === 'characters' ? 'active' : ''} onClick={() => setTab('characters')}>角色页</button>
+        <button className={tab === 'battle' ? 'active' : ''} onClick={() => setTab('battle')}>战斗页</button>
       </div>
 
-      {tab === 'library' ? (
-        <CardLibraryPage cards={allBattleCards} professionFilter={professionFilter} onProfessionFilterChange={setProfessionFilter} />
-      ) : null}
+      {tab === 'library' ? <CardLibraryPage cards={allBattleCards} professionFilter={professionFilter} onProfessionFilterChange={setProfessionFilter} /> : null}
 
       {tab === 'characters' ? (
         <CharacterPage
           characters={leftCharacters}
           allCards={allBattleCards}
-          onUpdateCharacter={(next) =>
-            setLeftCharacters((list) => list.map((c) => (c.id === next.id ? next : c)))
-          }
+          onUpdateCharacter={(next) => setLeftCharacters((list) => list.map((c) => (c.id === next.id ? next : c)))}
         />
       ) : null}
 
       {tab === 'battle' ? (
         <>
-          <section>
-            <h2>战前配置</h2>
+          <section className="panel">
+            <h2>战前配置确认</h2>
             <label>
               预设：
               <select value={selectedPresetId} onChange={(e) => setSelectedPresetId(e.target.value)}>
@@ -104,6 +100,24 @@ function App() {
               </select>
             </label>
             <p>{selectedPreset.description}</p>
+            <div className="config-grid">
+              <div>
+                <h3>左队（当前可编辑）</h3>
+                {leftCharacters.map((c) => (
+                  <p key={c.id}>
+                    {c.name} [{c.profession}/{c.position}] sig:{c.loadout.signatureSkill} | C:{c.loadout.commonCards.join(', ') || '-'} | K:{c.loadout.classCards.join(', ') || '-'}
+                  </p>
+                ))}
+              </div>
+              <div>
+                <h3>右队（预设）</h3>
+                {selectedPreset.rightTeam.map((c) => (
+                  <p key={c.id}>
+                    {c.name} [{c.profession}/{c.position}] sig:{c.loadout.signatureSkill} | C:{c.loadout.commonCards.join(', ') || '-'} | K:{c.loadout.classCards.join(', ') || '-'}
+                  </p>
+                ))}
+              </div>
+            </div>
           </section>
 
           <BattleControls
@@ -120,25 +134,19 @@ function App() {
           />
 
           {battleResult && currentSnapshot ? (
-            <>
-              <BattleView
-                snapshot={currentSnapshot}
-                currentEvent={currentEvent}
-                step={step}
-                totalSteps={battleResult.history.length}
-                winner={isEnded ? battleResult.winner : undefined}
-              />
+            <div className="battle-layout">
+              <BattleView snapshot={currentSnapshot} currentEvent={currentEvent} step={step} totalSteps={battleResult.history.length} winner={isEnded ? battleResult.winner : undefined} />
               <BattleLogPanel logs={battleResult.logs} events={battleResult.events} step={step} />
               {isEnded ? <BattleReportPanel winner={battleResult.winner} rounds={battleResult.rounds} report={battleResult.battleReport} /> : null}
-            </>
+            </div>
           ) : (
             <p>请先开始战斗。</p>
           )}
         </>
       ) : null}
 
-      <section>
-        <h2>可用角色目录（只读）</h2>
+      <section className="panel">
+        <h2>角色目录</h2>
         <ul>
           {characterCatalog.map((c) => (
             <li key={c.id}>

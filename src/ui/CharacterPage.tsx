@@ -6,70 +6,99 @@ type CharacterPageProps = {
   onUpdateCharacter: (next: UnitConfig) => void
 }
 
-const cardOptions = (cards: CardConfig[], ids: string[]) => cards.filter((c) => ids.includes(c.id))
+const EMPTY_SLOT = ''
+const SLOT_COUNT = 4
+
+const normalizeSlots = (slots: string[]) => Array.from({ length: SLOT_COUNT }, (_, i) => slots[i] ?? EMPTY_SLOT)
 
 export const CharacterPage = ({ characters, allCards, onUpdateCharacter }: CharacterPageProps) => {
   return (
-    <section>
+    <section className="panel">
       <h2>角色页面</h2>
       <div className="character-scroll">
         {characters.map((hero) => {
-          const selectableCommon = cardOptions(allCards, hero.selectableCommonCards)
-          const selectableClass = cardOptions(allCards, hero.selectableClassCards)
+          const commonSlots = normalizeSlots(hero.loadout.commonCards)
+          const classSlots = normalizeSlots(hero.loadout.classCards)
+          const selectableCommon = allCards.filter((card) => hero.selectableCommonCards.includes(card.id))
+          const selectableClass = allCards.filter((card) => hero.selectableClassCards.includes(card.id))
+
+          const updateCommonSlot = (index: number, value: string) => {
+            const next = [...commonSlots]
+            next[index] = value
+            onUpdateCharacter({ ...hero, loadout: { ...hero.loadout, commonCards: next.filter(Boolean) } })
+          }
+
+          const updateClassSlot = (index: number, value: string) => {
+            const next = [...classSlots]
+            next[index] = value
+            onUpdateCharacter({ ...hero, loadout: { ...hero.loadout, classCards: next.filter(Boolean) } })
+          }
 
           return (
             <article key={hero.id} className="character-card">
-              <h3>
-                {hero.name} ({hero.profession})
-              </h3>
-              <p>tags: {hero.tags.join(', ')}</p>
-              <p>
-                属性: HP {hero.maxHp} / ATK {hero.attack} / SPD {hero.speed} / 站位 {hero.position}
-              </p>
-              <p>专属技能: {hero.signatureSkill}</p>
-              <p>{hero.backstory}</p>
+              <header>
+                <h3>
+                  {hero.name} <span>({hero.profession})</span>
+                </h3>
+                <p>
+                  站位 {hero.position} | HP {hero.maxHp} | ATK {hero.attack} | SPD {hero.speed}
+                </p>
+              </header>
 
-              <label>
-                通用槽1：
-                <select
-                  value={hero.loadout.commonCards[0] ?? ''}
-                  onChange={(e) =>
-                    onUpdateCharacter({
-                      ...hero,
-                      loadout: { ...hero.loadout, commonCards: [e.target.value, hero.loadout.commonCards[1]].filter(Boolean) },
-                    })
-                  }
-                >
-                  <option value="">--</option>
-                  {selectableCommon.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
+              <div className="story-card">
+                <strong>角色背景</strong>
+                <p>{hero.backstory}</p>
+                <p>Tags: {hero.tags.join(', ')}</p>
+              </div>
+
+              <div className="slot-block">
+                <h4>专属技能槽（只读）</h4>
+                <div className="slot fixed">{hero.loadout.signatureSkill}</div>
+              </div>
+
+              <div className="slot-block">
+                <h4>通用技能槽（4）</h4>
+                <div className="slot-grid">
+                  {commonSlots.map((slot, index) => (
+                    <div className="slot" key={`common-${hero.id}-${index}`}>
+                      <span>槽位 {index + 1}</span>
+                      <select value={slot} onChange={(e) => updateCommonSlot(index, e.target.value)}>
+                        <option value="">空槽</option>
+                        {selectableCommon.map((card) => (
+                          <option key={card.id} value={card.id}>
+                            {card.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button type="button" onClick={() => updateCommonSlot(index, EMPTY_SLOT)}>
+                        移除
+                      </button>
+                    </div>
                   ))}
-                </select>
-              </label>
+                </div>
+              </div>
 
-              <label>
-                职业槽1：
-                <select
-                  value={hero.loadout.classCards[0] ?? ''}
-                  onChange={(e) =>
-                    onUpdateCharacter({
-                      ...hero,
-                      loadout: { ...hero.loadout, classCards: [e.target.value].filter(Boolean) },
-                    })
-                  }
-                >
-                  <option value="">--</option>
-                  {selectableClass.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
+              <div className="slot-block">
+                <h4>职业技能槽（4）</h4>
+                <div className="slot-grid">
+                  {classSlots.map((slot, index) => (
+                    <div className="slot" key={`class-${hero.id}-${index}`}>
+                      <span>槽位 {index + 1}</span>
+                      <select value={slot} onChange={(e) => updateClassSlot(index, e.target.value)}>
+                        <option value="">空槽</option>
+                        {selectableClass.map((card) => (
+                          <option key={card.id} value={card.id}>
+                            {card.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button type="button" onClick={() => updateClassSlot(index, EMPTY_SLOT)}>
+                        移除
+                      </button>
+                    </div>
                   ))}
-                </select>
-              </label>
-
-              <p>当前携带: common[{hero.loadout.commonCards.join(', ')}] class[{hero.loadout.classCards.join(', ')}]</p>
+                </div>
+              </div>
             </article>
           )
         })}

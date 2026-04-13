@@ -14,10 +14,10 @@ export const CardLibraryPage = ({ cards, professionFilter, onProfessionFilterCha
   })
 
   return (
-    <section>
+    <section className="panel">
       <h2>牌库页面</h2>
-      <label>
-        职业过滤：
+      <div className="filter-row">
+        <label>职业过滤</label>
         <select value={professionFilter} onChange={(e) => onProfessionFilterChange(e.target.value as Profession | 'all')}>
           <option value="all">all</option>
           <option value="warrior">warrior</option>
@@ -27,19 +27,28 @@ export const CardLibraryPage = ({ cards, professionFilter, onProfessionFilterCha
           <option value="hunter">hunter</option>
           <option value="assassin">assassin</option>
         </select>
-      </label>
+      </div>
+
       {pools.map((pool) => (
-        <div key={pool}>
-          <h3>{pool}</h3>
-          <ul>
+        <div key={pool} className="pool-section">
+          <h3>{pool.toUpperCase()}</h3>
+          <div className="card-grid">
             {visible
               .filter((card) => card.cardPool === pool)
               .map((card) => (
-                <li key={card.id}>
-                  <strong>{card.name}</strong> [{card.costType}:{card.cost}] / {card.range} / {card.description}
-                </li>
+                <article key={card.id} className="card-item">
+                  <header>
+                    <strong>{card.name}</strong>
+                    <span>
+                      {card.costType}:{card.cost}
+                    </span>
+                  </header>
+                  <p>restriction: {card.classRestriction?.join(', ') ?? 'none'}</p>
+                  <p>target/range: {card.effects[0]?.targetType ?? '-'} / {card.range}</p>
+                  <p>{card.description}</p>
+                </article>
               ))}
-          </ul>
+          </div>
         </div>
       ))}
     </section>
