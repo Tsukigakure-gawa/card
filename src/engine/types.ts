@@ -1,4 +1,20 @@
-export type CardTargetType = 'self' | 'enemy_front' | 'enemy_lowest_hp'
+export type Profession = 'warrior' | 'tank' | 'mage' | 'priest' | 'hunter' | 'assassin'
+export type Position = 'front' | 'middle' | 'back'
+export type CardPool = 'common' | 'class' | 'signature'
+export type CostType = 'actionPoints' | 'mana' | 'fightingSpirit'
+export type CardTargetType =
+  | 'self'
+  | 'ally_single'
+  | 'ally_front'
+  | 'ally_back'
+  | 'enemy_front'
+  | 'enemy_middle'
+  | 'enemy_back'
+  | 'enemy_single'
+  | 'enemy_lowest_hp'
+  | 'all_allies'
+  | 'all_enemies'
+
 export type StatusEffectType = 'burn' | 'poison' | 'stun' | 'taunt'
 export type BattlePhase = 'turn_start' | 'before_action' | 'action' | 'after_action' | 'turn_end'
 
@@ -16,47 +32,48 @@ export type ImmunityEffect = {
 }
 
 export type CardEffect =
-  | {
-      kind: 'damage' | 'shield' | 'heal'
-      value: number
-      targetType: CardTargetType
-    }
-  | {
-      kind: 'apply_status'
-      statusType: StatusEffectType
-      value: number
-      duration: number
-      targetType: CardTargetType
-    }
-  | {
-      kind: 'cleanse' | 'dispel'
-      targetType: CardTargetType
-    }
-  | {
-      kind: 'apply_immunity'
-      targetType: CardTargetType
-      duration: number
-      immuneTo: StatusEffectType[]
-    }
+  | { kind: 'damage' | 'shield' | 'heal'; value: number; targetType: CardTargetType }
+  | { kind: 'apply_status'; statusType: StatusEffectType; value: number; duration: number; targetType: CardTargetType }
+  | { kind: 'cleanse' | 'dispel'; targetType: CardTargetType }
+  | { kind: 'apply_immunity'; targetType: CardTargetType; duration: number; immuneTo: StatusEffectType[] }
 
 export type CardConfig = {
   id: string
   name: string
+  cardPool: CardPool
+  classRestriction?: Profession[]
+  costType: CostType
+  cost: number
+  range: 'single' | 'multi'
+  description: string
   effects: CardEffect[]
+}
+
+export type UnitLoadout = {
+  signatureSkill: string
+  commonCards: string[]
+  classCards: string[]
 }
 
 export type UnitConfig = {
   id: string
   name: string
-  hp: number
+  profession: Profession
+  tags: string[]
+  maxHp: number
   attack: number
   speed: number
+  position: Position
+  backstory: string
+  signatureSkill: string
+  selectableCommonCards: string[]
+  selectableClassCards: string[]
+  loadout: UnitLoadout
 }
 
 export type TeamConfig = {
   name: string
   units: UnitConfig[]
-  deck: string[]
 }
 
 export type BattleConfig = {
@@ -68,6 +85,8 @@ export type BattleConfig = {
 export type UnitStateSnapshot = {
   id: string
   name: string
+  profession: Profession
+  position: Position
   team: string
   currentHp: number
   maxHp: number
@@ -75,6 +94,11 @@ export type UnitStateSnapshot = {
   speed: number
   shield: number
   alive: boolean
+  actionPoints: number
+  maxActionPoints: number
+  classResourceType?: CostType
+  classResource: number
+  maxClassResource: number
   statusEffects: StatusEffect[]
   immunities: ImmunityEffect[]
 }
@@ -121,6 +145,7 @@ export type BattleEventType =
   | 'dispel'
   | 'apply_immunity'
   | 'block_status'
+  | 'resource_change'
   | 'unit_down'
   | 'battle_end'
 

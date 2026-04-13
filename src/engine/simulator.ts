@@ -9,7 +9,10 @@ import type {
   BattleStateSnapshot,
   CardConfig,
   CardEffect,
+  CostType,
   ImmunityEffect,
+  Position,
+  Profession,
   StatusEffect,
   StatusEffectType,
   TeamConfig,
@@ -24,18 +27,16 @@ type UnitState = UnitConfig & {
   currentHp: number
   shield: number
   alive: boolean
+  actionPoints: number
+  maxActionPoints: number
+  classResourceType?: CostType
+  classResource: number
+  maxClassResource: number
   statusEffects: StatusEffect[]
   immunities: ImmunityEffect[]
 }
 
-type TeamState = {
-  name: string
-  units: UnitState[]
-  drawPile: string[]
-  hand: CardConfig[]
-  discardPile: CardConfig[]
-}
-
+type TeamState = { name: string; units: UnitState[]; drawPile: string[]; hand: CardConfig[]; discardPile: CardConfig[] }
 type BattleState = {
   left: TeamState
   right: TeamState
@@ -46,493 +47,377 @@ type BattleState = {
   currentPhase: BattlePhase
 }
 
-const LOW_SHIELD_THRESHOLD = 4
-const MAX_ROUNDS = 50
+const MAX_ROUNDS = 60
 const NEGATIVE_STATUS: StatusEffectType[] = ['burn', 'poison', 'stun']
 const POSITIVE_STATUS: StatusEffectType[] = ['taunt']
 
-const getLivingUnits = (units: UnitState[]) => units.filter((unit) => unit.alive)
-const chooseFrontTarget = (units: UnitState[]) => getLivingUnits(units)[0]
-const chooseLowestHpTarget = (units: UnitState[]) =>
-  getLivingUnits(units).sort((a, b) => a.currentHp - b.currentHp || a.id.localeCompare(b.id))[0]
+const getLivingUnits = (units: UnitState[]) => units.filter((u) => u.alive)
+const byPosition = (units: UnitState[], p: Position) => getLivingUnits(units).find((u) => u.position === p)
+const nearestEnemy = (units: UnitState[]) => byPosition(units, 'front') ?? byPosition(units, 'middle') ?? byPosition(units, 'back')
 
-const hasStatus = (unit: UnitState, type: StatusEffectType) =>
-  unit.statusEffects.some((effect) => effect.type === type && effect.duration > 0)
-
-const toUnitSnapshot = (unit: UnitState): UnitStateSnapshot => ({
-  id: unit.id,
-  name: unit.name,
-  team: unit.team,
-  currentHp: unit.currentHp,
-  maxHp: unit.hp,
-  attack: unit.attack,
-  speed: unit.speed,
-  shield: unit.shield,
-  alive: unit.alive,
-  statusEffects: unit.statusEffects.map((effect) => ({ ...effect })),
-  immunities: unit.immunities.map((immunity) => ({ ...immunity, immuneTo: [...immunity.immuneTo] })),
-})
-
-const toTeamSnapshot = (team: TeamState): TeamStateSnapshot => ({
-  name: team.name,
-  units: team.units.map(toUnitSnapshot),
-  drawPile: [...team.drawPile],
-  hand: team.hand.map((card) => card.id),
-  discardPile: team.discardPile.map((card) => card.id),
-})
-
-const snapshotBattleState = (state: BattleState): BattleStateSnapshot => ({
-  left: toTeamSnapshot(state.left),
-  right: toTeamSnapshot(state.right),
-  turn: state.turn ? { ...state.turn } : null,
-  logs: [...state.logs],
-})
-
-const formatEventLog = (event: BattleEvent): string => {
-  switch (event.type) {
-    case 'phase_start':
-      return `阶段：${event.payload?.phase}`
-    case 'battle_start':
-      return `战斗开始：${event.payload?.leftTeam} vs ${event.payload?.rightTeam}`
-    case 'turn_start':
-      return `回合 ${event.payload?.round} 行动开始：${event.payload?.actorTeam}·${event.payload?.actorName}`
-    case 'draw_card':
-      return `${event.payload?.teamName} 抽到卡牌：${event.payload?.cardName}`
-    case 'recycle_discard':
-      return `${event.payload?.teamName} 洗牌回收 ${event.payload?.count} 张`
-    case 'play_card':
-      return `${event.payload?.actorTeam}·${event.payload?.actorName} 出牌：${event.payload?.cardName}`
-    case 'discard_card':
-      return `${event.payload?.teamName} 弃牌：${event.payload?.cardName}`
-    case 'basic_attack':
-      return `${event.payload?.actorTeam}·${event.payload?.actorName} 普通攻击 ${event.payload?.targetTeam}·${event.payload?.targetName}`
-    case 'gain_shield':
-      return `${event.payload?.targetName} 获得护盾 ${event.payload?.amount}`
-    case 'deal_damage':
-      return `${event.payload?.targetName} 受到 ${event.payload?.rawDamage} 伤害（生命-${event.payload?.hpDamage}）`
-    case 'apply_status':
-      return `${event.payload?.targetName} 获得状态 ${event.payload?.statusType}(${event.payload?.mode})`
-    case 'tick_status':
-      return `${event.payload?.targetName} 的 ${event.payload?.statusType} 触发`
-    case 'remove_status':
-      return `${event.payload?.targetName} 的 ${event.payload?.statusType} 移除`
-    case 'heal':
-      return `${event.payload?.targetName} 回复 ${event.payload?.healAmount}`
-    case 'skip_turn':
-      return `${event.payload?.targetName} 跳过行动`
-    case 'cleanse':
-      return `${event.payload?.targetName} 被净化，移除 ${event.payload?.removedCount} 个负面状态`
-    case 'dispel':
-      return `${event.payload?.targetName} 被驱散，移除 ${event.payload?.removedCount} 个正面状态`
-    case 'apply_immunity':
-      return `${event.payload?.targetName} 获得免疫(${event.payload?.duration})`
-    case 'block_status':
-      return `${event.payload?.targetName} 免疫了 ${event.payload?.statusType}`
-    case 'unit_down':
-      return `${event.payload?.targetName} 死亡`
-    case 'battle_end':
-      return `战斗结束：胜利方 ${event.payload?.winner}`
-    default:
-      return event.type
-  }
+const resourceRules: Record<Profession, { baseAP: number; apRegen: number; classType?: CostType; classBase?: number; manaScale?: boolean }> = {
+  warrior: { baseAP: 2, apRegen: 2, classType: 'fightingSpirit', classBase: 3 },
+  tank: { baseAP: 2, apRegen: 2, classType: 'fightingSpirit', classBase: 3 },
+  mage: { baseAP: 1, apRegen: 1, classType: 'mana', classBase: 3, manaScale: true },
+  priest: { baseAP: 1, apRegen: 1, classType: 'mana', classBase: 3, manaScale: true },
+  hunter: { baseAP: 4, apRegen: 2, classType: 'actionPoints', classBase: 0 },
+  assassin: { baseAP: 4, apRegen: 2, classType: 'actionPoints', classBase: 0 },
 }
 
-const emitEvent = (
-  state: BattleState,
-  type: BattleEventType,
-  fields: Omit<BattleEvent, 'type' | 'stepIndex' | 'phase'> = {},
-) => {
-  const event: BattleEvent = {
-    type,
-    stepIndex: state.nextStepIndex,
-    phase: state.currentPhase,
-    ...fields,
-  }
-  state.nextStepIndex += 1
-  state.events.push(event)
-  state.logs.push(formatEventLog(event))
+const toUnitSnapshot = (u: UnitState): UnitStateSnapshot => ({
+  id: u.id,
+  name: u.name,
+  profession: u.profession,
+  position: u.position,
+  team: u.team,
+  currentHp: u.currentHp,
+  maxHp: u.maxHp,
+  attack: u.attack,
+  speed: u.speed,
+  shield: u.shield,
+  alive: u.alive,
+  actionPoints: u.actionPoints,
+  maxActionPoints: u.maxActionPoints,
+  classResourceType: u.classResourceType,
+  classResource: u.classResource,
+  maxClassResource: u.maxClassResource,
+  statusEffects: u.statusEffects.map((s) => ({ ...s })),
+  immunities: u.immunities.map((i) => ({ ...i, immuneTo: [...i.immuneTo] })),
+})
+
+const toTeamSnapshot = (t: TeamState): TeamStateSnapshot => ({
+  name: t.name,
+  units: t.units.map(toUnitSnapshot),
+  drawPile: [...t.drawPile],
+  hand: t.hand.map((c) => c.id),
+  discardPile: t.discardPile.map((c) => c.id),
+})
+
+const snapshot = (s: BattleState): BattleStateSnapshot => ({ left: toTeamSnapshot(s.left), right: toTeamSnapshot(s.right), turn: s.turn ? { ...s.turn } : null, logs: [...s.logs] })
+
+const logFromEvent = (e: BattleEvent) => `${e.stepIndex}.${e.type}`
+
+const emit = (s: BattleState, type: BattleEventType, fields: Omit<BattleEvent, 'type' | 'stepIndex' | 'phase'> = {}) => {
+  const event: BattleEvent = { type, stepIndex: s.nextStepIndex, phase: s.currentPhase, ...fields }
+  s.nextStepIndex += 1
+  s.events.push(event)
+  s.logs.push(logFromEvent(event))
 }
 
-const setPhase = (state: BattleState, phase: BattlePhase) => {
-  state.currentPhase = phase
-  emitEvent(state, 'phase_start', { payload: { phase } })
+const setPhase = (s: BattleState, phase: BattlePhase) => {
+  s.currentPhase = phase
+  emit(s, 'phase_start', { payload: { phase } })
 }
 
-const applyDamage = (target: UnitState, damage: number) => {
-  const absorbed = Math.min(target.shield, damage)
-  target.shield -= absorbed
+const applyDamage = (t: UnitState, damage: number) => {
+  const absorbed = Math.min(t.shield, damage)
+  t.shield -= absorbed
   const hpDamage = damage - absorbed
-  target.currentHp -= hpDamage
-  if (target.currentHp <= 0 && target.alive) target.alive = false
+  t.currentHp -= hpDamage
+  if (t.currentHp <= 0) t.alive = false
   return { absorbed, hpDamage }
 }
 
-const createTeamState = (team: TeamConfig): TeamState => ({
-  name: team.name,
-  units: team.units.map((unit) => ({
-    ...unit,
-    team: team.name,
-    currentHp: unit.hp,
-    shield: 0,
-    alive: true,
-    statusEffects: [],
-    immunities: [],
-  })),
-  drawPile: [...team.deck],
-  hand: [],
-  discardPile: [],
-})
-
-const removeExpiredStatuses = (unit: UnitState, state: BattleState, actorId?: string) => {
-  unit.statusEffects = unit.statusEffects.filter((effect) => {
-    if (effect.duration > 0) return true
-    emitEvent(state, 'remove_status', {
-      actorId,
-      targetId: unit.id,
-      payload: { targetName: unit.name, statusType: effect.type },
-    })
+const removeExpiredStatus = (s: BattleState, u: UnitState) => {
+  u.statusEffects = u.statusEffects.filter((st) => {
+    if (st.duration > 0) return true
+    emit(s, 'remove_status', { targetId: u.id, payload: { statusType: st.type } })
     return false
   })
+  u.immunities = u.immunities.filter((im) => im.duration > 0)
 }
 
-const removeExpiredImmunities = (unit: UnitState) => {
-  unit.immunities = unit.immunities.filter((immunity) => immunity.duration > 0)
-}
-
-const mergeStatusEffect = (unit: UnitState, incoming: StatusEffect) => {
-  const existing = unit.statusEffects.find((effect) => effect.type === incoming.type)
-  if (!existing) {
-    unit.statusEffects.push(incoming)
-    return 'new' as const
+const mergeStatus = (u: UnitState, inc: StatusEffect) => {
+  const ex = u.statusEffects.find((x) => x.type === inc.type)
+  if (!ex) {
+    u.statusEffects.push(inc)
+    return 'new'
   }
-
-  if (incoming.type === 'burn' || incoming.type === 'poison') {
-    existing.value += incoming.value
-    existing.duration = Math.max(existing.duration, incoming.duration)
-    existing.sourceUnitId = incoming.sourceUnitId
-    return 'stack' as const
+  if (inc.type === 'burn' || inc.type === 'poison') {
+    ex.value += inc.value
+    ex.duration = Math.max(ex.duration, inc.duration)
+    return 'stack'
   }
-
-  existing.duration = Math.max(existing.duration, incoming.duration)
-  existing.sourceUnitId = incoming.sourceUnitId
-  return 'refresh' as const
+  ex.duration = Math.max(ex.duration, inc.duration)
+  return 'refresh'
 }
 
-const isImmuneTo = (unit: UnitState, statusType: StatusEffectType) =>
-  unit.immunities.some((immunity) => immunity.duration > 0 && immunity.immuneTo.includes(statusType))
+const isImmune = (u: UnitState, st: StatusEffectType) => u.immunities.some((i) => i.duration > 0 && i.immuneTo.includes(st))
 
-const applyStatus = (
-  state: BattleState,
-  actor: UnitState,
-  target: UnitState,
-  statusType: StatusEffectType,
-  value: number,
-  duration: number,
-  cardId?: string,
-) => {
-  if (isImmuneTo(target, statusType)) {
-    emitEvent(state, 'block_status', {
-      actorId: actor.id,
-      targetId: target.id,
-      cardId,
-      payload: { targetName: target.name, statusType },
-    })
-    return
-  }
-
-  const mode = mergeStatusEffect(target, {
-    type: statusType,
-    value,
-    duration,
-    sourceUnitId: actor.id,
-  })
-
-  emitEvent(state, 'apply_status', {
-    actorId: actor.id,
-    targetId: target.id,
-    cardId,
-    payload: { targetName: target.name, statusType, value, duration, mode },
-  })
+const canPay = (u: UnitState, c: CardConfig) => {
+  if (c.costType === 'actionPoints') return u.actionPoints >= c.cost
+  return u.classResourceType === c.costType && u.classResource >= c.cost
 }
 
-const getTauntTargets = (enemyUnits: UnitState[]) => {
-  const taunt = getLivingUnits(enemyUnits).filter((unit) => hasStatus(unit, 'taunt'))
-  return taunt.length > 0 ? taunt : getLivingUnits(enemyUnits)
-}
-
-const chooseCardIndex = (actor: UnitState, hand: CardConfig[]) => {
-  if (hand.length === 0) return -1
-  const hasKind = (card: CardConfig, kind: CardEffect['kind']) => card.effects.some((effect) => effect.kind === kind)
-  const shield = hand.findIndex((card) => hasKind(card, 'shield'))
-  const damage = hand.findIndex((card) => hasKind(card, 'damage'))
-  if (actor.shield <= LOW_SHIELD_THRESHOLD && shield >= 0) return shield
-  if (damage >= 0) return damage
-  if (shield >= 0) return shield
-  return 0
-}
-
-const pickTargetByType = (targetType: 'self' | 'enemy_front' | 'enemy_lowest_hp', actor: UnitState, enemy: UnitState[]) => {
-  if (targetType === 'self') return actor
-  const pool = getTauntTargets(enemy)
-  return targetType === 'enemy_lowest_hp' ? chooseLowestHpTarget(pool) : chooseFrontTarget(pool)
-}
-
-const settleDeath = (state: BattleState, actorId: string, target: UnitState) => {
-  if (!target.alive) {
-    emitEvent(state, 'unit_down', { actorId, targetId: target.id, payload: { targetName: target.name } })
+const payCost = (s: BattleState, u: UnitState, c: CardConfig) => {
+  if (c.costType === 'actionPoints') {
+    u.actionPoints -= c.cost
+    emit(s, 'resource_change', { actorId: u.id, payload: { actionPoints: u.actionPoints } })
+  } else if (u.classResourceType === c.costType) {
+    u.classResource -= c.cost
+    emit(s, 'resource_change', { actorId: u.id, payload: { classResource: u.classResource, classResourceType: u.classResourceType } })
   }
 }
 
-const tickBeforeActionStatuses = (state: BattleState, actor: UnitState) => {
-  let skip = false
-  for (const effect of actor.statusEffects) {
-    if (effect.duration <= 0) continue
-    if (effect.type === 'burn' || effect.type === 'poison') {
-      emitEvent(state, 'tick_status', {
-        actorId: actor.id,
-        targetId: actor.id,
-        payload: { targetName: actor.name, statusType: effect.type },
-      })
-      const { absorbed, hpDamage } = applyDamage(actor, effect.value)
-      emitEvent(state, 'deal_damage', {
-        actorId: effect.sourceUnitId,
-        targetId: actor.id,
-        payload: {
-          source: effect.type,
-          targetName: actor.name,
-          rawDamage: effect.value,
-          absorbed,
-          hpDamage,
-          targetHpAfter: Math.max(actor.currentHp, 0),
-        },
-      })
-      effect.duration -= 1
-      settleDeath(state, effect.sourceUnitId ?? actor.id, actor)
+const createTeam = (team: TeamConfig, cards: Map<string, CardConfig>): TeamState => {
+  const units: UnitState[] = team.units.map((u) => {
+    const rule = resourceRules[u.profession]
+    const maxClass = rule.classType === 'mana' ? 10 : rule.classBase ?? 0
+    return {
+      ...u,
+      team: team.name,
+      currentHp: u.maxHp,
+      shield: 0,
+      alive: true,
+      actionPoints: rule.baseAP,
+      maxActionPoints: rule.baseAP,
+      classResourceType: rule.classType === 'actionPoints' ? undefined : rule.classType,
+      classResource: rule.classType && rule.classType !== 'actionPoints' ? (rule.classBase ?? 0) : 0,
+      maxClassResource: maxClass,
+      statusEffects: [],
+      immunities: [],
     }
+  })
 
-    if (effect.type === 'stun') {
-      emitEvent(state, 'tick_status', {
-        actorId: actor.id,
-        targetId: actor.id,
-        payload: { targetName: actor.name, statusType: effect.type },
-      })
-      emitEvent(state, 'skip_turn', { actorId: actor.id, targetId: actor.id, payload: { targetName: actor.name } })
-      effect.duration -= 1
+  const deckIds = units.flatMap((u) => [u.loadout.signatureSkill, ...u.loadout.commonCards, ...u.loadout.classCards])
+  const drawPile = deckIds.filter((id) => cards.has(id))
+  return { name: team.name, units, drawPile, hand: [], discardPile: [] }
+}
+
+const pickTargets = (actor: UnitState, enemyTeam: TeamState, allyTeam: TeamState, targetType: CardEffect['targetType']): UnitState[] => {
+  const enemyPool = getLivingUnits(enemyTeam.units)
+  const allyPool = getLivingUnits(allyTeam.units)
+  const tauntEnemies = enemyPool.filter((u) => u.statusEffects.some((st) => st.type === 'taunt' && st.duration > 0))
+  const enemy = tauntEnemies.length > 0 ? tauntEnemies : enemyPool
+
+  let raw: Array<UnitState | undefined> = []
+  switch (targetType) {
+    case 'self':
+      raw = [actor]
+      break
+    case 'ally_single':
+      raw = [allyPool[0]]
+      break
+    case 'ally_front':
+      raw = [allyPool.find((u) => u.position === 'front')]
+      break
+    case 'ally_back':
+      raw = [allyPool.find((u) => u.position === 'back')]
+      break
+    case 'enemy_front':
+      raw = [byPosition(enemy, 'front') ?? nearestEnemy(enemy)]
+      break
+    case 'enemy_middle':
+      raw = [byPosition(enemy, 'middle') ?? nearestEnemy(enemy)]
+      break
+    case 'enemy_back':
+      raw = [byPosition(enemy, 'back') ?? nearestEnemy(enemy)]
+      break
+    case 'enemy_single':
+      raw = [nearestEnemy(enemy)]
+      break
+    case 'enemy_lowest_hp':
+      raw = [enemy.slice().sort((a, b) => a.currentHp - b.currentHp)[0]]
+      break
+    case 'all_allies':
+      raw = allyPool
+      break
+    case 'all_enemies':
+      raw = enemy
+      break
+    default:
+      raw = []
+  }
+
+  return raw.filter((v): v is UnitState => Boolean(v))
+}
+
+const applyCardEffect = (s: BattleState, actor: UnitState, actorTeam: TeamState, enemyTeam: TeamState, card: CardConfig, effect: CardEffect) => {
+  const targets = pickTargets(actor, enemyTeam, actorTeam, effect.targetType)
+  for (const target of targets) {
+    if (effect.kind === 'damage') {
+      const { absorbed, hpDamage } = applyDamage(target, effect.value)
+      emit(s, 'deal_damage', { actorId: actor.id, targetId: target.id, cardId: card.id, payload: { rawDamage: effect.value, absorbed, hpDamage } })
+      if (!target.alive) emit(s, 'unit_down', { actorId: actor.id, targetId: target.id })
+    } else if (effect.kind === 'shield') {
+      target.shield += effect.value
+      emit(s, 'gain_shield', { actorId: actor.id, targetId: target.id, payload: { amount: effect.value } })
+    } else if (effect.kind === 'heal') {
+      const before = target.currentHp
+      target.currentHp = Math.min(target.maxHp, target.currentHp + effect.value)
+      emit(s, 'heal', { actorId: actor.id, targetId: target.id, payload: { healAmount: target.currentHp - before } })
+    } else if (effect.kind === 'apply_status') {
+      if (isImmune(target, effect.statusType)) {
+        emit(s, 'block_status', { actorId: actor.id, targetId: target.id, payload: { statusType: effect.statusType } })
+      } else {
+        const mode = mergeStatus(target, { type: effect.statusType, value: effect.value, duration: effect.duration, sourceUnitId: actor.id })
+        emit(s, 'apply_status', { actorId: actor.id, targetId: target.id, payload: { statusType: effect.statusType, mode } })
+      }
+    } else if (effect.kind === 'cleanse') {
+      const before = target.statusEffects.length
+      target.statusEffects = target.statusEffects.filter((st) => !NEGATIVE_STATUS.includes(st.type))
+      emit(s, 'cleanse', { actorId: actor.id, targetId: target.id, payload: { removedCount: before - target.statusEffects.length } })
+    } else if (effect.kind === 'dispel') {
+      const before = target.statusEffects.length
+      target.statusEffects = target.statusEffects.filter((st) => !POSITIVE_STATUS.includes(st.type))
+      emit(s, 'dispel', { actorId: actor.id, targetId: target.id, payload: { removedCount: before - target.statusEffects.length } })
+    } else if (effect.kind === 'apply_immunity') {
+      target.immunities.push({ immuneTo: effect.immuneTo, duration: effect.duration, sourceUnitId: actor.id })
+      emit(s, 'apply_immunity', { actorId: actor.id, targetId: target.id, payload: { duration: effect.duration } })
+    }
+  }
+}
+
+const tickStatusesBeforeAction = (s: BattleState, u: UnitState) => {
+  let skip = false
+  for (const st of u.statusEffects) {
+    if (st.duration <= 0) continue
+    if (st.type === 'burn' || st.type === 'poison') {
+      emit(s, 'tick_status', { targetId: u.id, payload: { statusType: st.type } })
+      const { hpDamage } = applyDamage(u, st.value)
+      emit(s, 'deal_damage', { actorId: st.sourceUnitId, targetId: u.id, payload: { rawDamage: st.value, hpDamage, source: st.type } })
+      st.duration -= 1
+    }
+    if (st.type === 'stun') {
+      emit(s, 'skip_turn', { targetId: u.id })
+      st.duration -= 1
       skip = true
     }
   }
-
-  removeExpiredStatuses(actor, state, actor.id)
+  removeExpiredStatus(s, u)
   return skip
 }
 
-const tickTurnEnd = (state: BattleState, actor: UnitState) => {
-  for (const effect of actor.statusEffects) {
-    if (effect.type === 'taunt' && effect.duration > 0) effect.duration -= 1
+const recoverResourcesTurnEnd = (s: BattleState, u: UnitState, round: number) => {
+  const rule = resourceRules[u.profession]
+  u.actionPoints = Math.min(u.maxActionPoints, u.actionPoints + rule.apRegen)
+  if (u.classResourceType === 'fightingSpirit') {
+    u.classResource = 3
   }
-  for (const immunity of actor.immunities) {
-    if (immunity.duration > 0) immunity.duration -= 1
+  if (u.classResourceType === 'mana') {
+    u.classResource = Math.min(u.maxClassResource, u.classResource + 3 + round)
   }
-  removeExpiredStatuses(actor, state, actor.id)
-  removeExpiredImmunities(actor)
+  for (const im of u.immunities) im.duration -= 1
+  for (const st of u.statusEffects) if (st.type === 'taunt') st.duration -= 1
+  removeExpiredStatus(s, u)
+  emit(s, 'resource_change', { actorId: u.id, payload: { actionPoints: u.actionPoints, classResource: u.classResource } })
 }
 
-const drawCard = (team: TeamState, cardsById: Map<string, CardConfig>, state: BattleState, actorId: string) => {
-  if (team.drawPile.length === 0 && team.discardPile.length > 0) {
-    team.drawPile.push(...team.discardPile.map((card) => card.id).sort())
-    team.discardPile = []
-    emitEvent(state, 'recycle_discard', { actorId, payload: { teamName: team.name, count: team.drawPile.length } })
-  }
+const chooseCardIndex = (u: UnitState, hand: CardConfig[]) => {
+  const affordable = hand.map((c, idx) => ({ c, idx })).filter(({ c }) => canPay(u, c))
+  if (affordable.length === 0) return -1
+  const shield = affordable.find((x) => x.c.effects.some((e) => e.kind === 'shield'))
+  if (u.shield <= 2 && shield) return shield.idx
+  const dmg = affordable.find((x) => x.c.effects.some((e) => e.kind === 'damage'))
+  return (dmg ?? affordable[0]).idx
+}
 
+const draw = (s: BattleState, team: TeamState, cards: Map<string, CardConfig>, actorId: string) => {
+  if (team.drawPile.length === 0 && team.discardPile.length > 0) {
+    team.drawPile.push(...team.discardPile.map((c) => c.id))
+    team.discardPile = []
+    emit(s, 'recycle_discard', { actorId })
+  }
   const cardId = team.drawPile.shift()
   if (!cardId) return
-  const card = cardsById.get(cardId)
+  const card = cards.get(cardId)
   if (!card) return
   team.hand.push(card)
-  emitEvent(state, 'draw_card', { actorId, cardId, payload: { teamName: team.name, cardName: card.name } })
+  emit(s, 'draw_card', { actorId, cardId })
 }
 
-const settleCardEffect = (state: BattleState, actor: UnitState, enemyTeam: TeamState, card: CardConfig, effect: CardEffect) => {
-  const target = pickTargetByType(effect.targetType, actor, enemyTeam.units)
-  if (!target) return
-
-  if (effect.kind === 'damage') {
-    const { absorbed, hpDamage } = applyDamage(target, effect.value)
-    emitEvent(state, 'deal_damage', {
-      actorId: actor.id,
-      targetId: target.id,
-      cardId: card.id,
-      payload: { source: 'card', rawDamage: effect.value, absorbed, hpDamage, targetName: target.name, targetHpAfter: Math.max(target.currentHp, 0) },
-    })
-    settleDeath(state, actor.id, target)
-    return
-  }
-
-  if (effect.kind === 'shield') {
-    target.shield += effect.value
-    emitEvent(state, 'gain_shield', { actorId: actor.id, targetId: target.id, cardId: card.id, payload: { targetName: target.name, amount: effect.value, shieldAfter: target.shield } })
-    return
-  }
-
-  if (effect.kind === 'heal') {
-    const before = target.currentHp
-    target.currentHp = Math.min(target.hp, target.currentHp + effect.value)
-    emitEvent(state, 'heal', {
-      actorId: actor.id,
-      targetId: target.id,
-      cardId: card.id,
-      payload: { targetName: target.name, healAmount: target.currentHp - before, targetHpAfter: target.currentHp },
-    })
-    return
-  }
-
-  if (effect.kind === 'apply_status') {
-    applyStatus(state, actor, target, effect.statusType, effect.value, effect.duration, card.id)
-    return
-  }
-
-  if (effect.kind === 'cleanse') {
-    const before = target.statusEffects.length
-    target.statusEffects = target.statusEffects.filter((status) => !NEGATIVE_STATUS.includes(status.type))
-    emitEvent(state, 'cleanse', { actorId: actor.id, targetId: target.id, cardId: card.id, payload: { targetName: target.name, removedCount: before - target.statusEffects.length } })
-    return
-  }
-
-  if (effect.kind === 'dispel') {
-    const before = target.statusEffects.length
-    target.statusEffects = target.statusEffects.filter((status) => !POSITIVE_STATUS.includes(status.type))
-    emitEvent(state, 'dispel', { actorId: actor.id, targetId: target.id, cardId: card.id, payload: { targetName: target.name, removedCount: before - target.statusEffects.length } })
-    return
-  }
-
-  if (effect.kind === 'apply_immunity') {
-    target.immunities.push({ immuneTo: [...effect.immuneTo], duration: effect.duration, sourceUnitId: actor.id })
-    emitEvent(state, 'apply_immunity', { actorId: actor.id, targetId: target.id, cardId: card.id, payload: { targetName: target.name, duration: effect.duration } })
-  }
+const basicAttackTarget = (u: UnitState, enemy: TeamState) => {
+  if (u.profession === 'warrior' || u.profession === 'tank') return byPosition(enemy.units, 'front') ?? nearestEnemy(enemy.units)
+  return nearestEnemy(enemy.units)
 }
 
-const settleBasicAttack = (state: BattleState, actor: UnitState, enemyTeam: TeamState) => {
-  const target = chooseFrontTarget(getTauntTargets(enemyTeam.units))
-  if (!target) return
-
-  emitEvent(state, 'basic_attack', {
-    actorId: actor.id,
-    targetId: target.id,
-    payload: { actorTeam: actor.team, actorName: actor.name, targetTeam: target.team, targetName: target.name },
-  })
-
-  const { absorbed, hpDamage } = applyDamage(target, actor.attack)
-  emitEvent(state, 'deal_damage', {
-    actorId: actor.id,
-    targetId: target.id,
-    payload: { source: 'basic_attack', targetName: target.name, rawDamage: actor.attack, absorbed, hpDamage, targetHpAfter: Math.max(target.currentHp, 0) },
-  })
-  settleDeath(state, actor.id, target)
-}
-
-const buildBattleReport = (events: BattleEvent[], unitIds: string[]): BattleReport => {
+const buildBattleReport = (events: BattleEvent[], ids: string[]): BattleReport => {
   const units: Record<string, BattleReportUnitStats> = {}
-  for (const id of unitIds) {
-    units[id] = { unitId: id, dealtDamage: 0, takenDamage: 0, healingReceived: 0, statusesApplied: 0, statusDamageTriggers: 0 }
+  for (const id of ids) units[id] = { unitId: id, dealtDamage: 0, takenDamage: 0, healingReceived: 0, statusesApplied: 0, statusDamageTriggers: 0 }
+  for (const e of events) {
+    if (e.type === 'deal_damage') {
+      const d = Number(e.payload?.hpDamage ?? 0)
+      if (e.actorId && units[e.actorId]) units[e.actorId].dealtDamage += d
+      if (e.targetId && units[e.targetId]) units[e.targetId].takenDamage += d
+      if ((e.payload?.source === 'burn' || e.payload?.source === 'poison') && e.actorId && units[e.actorId]) units[e.actorId].statusDamageTriggers += 1
+    }
+    if (e.type === 'heal' && e.targetId && units[e.targetId]) units[e.targetId].healingReceived += Number(e.payload?.healAmount ?? 0)
+    if (e.type === 'apply_status' && e.actorId && units[e.actorId]) units[e.actorId].statusesApplied += 1
   }
-
-  for (const event of events) {
-    if (event.type === 'deal_damage') {
-      const hpDamage = Number(event.payload?.hpDamage ?? 0)
-      if (event.actorId && units[event.actorId]) units[event.actorId].dealtDamage += hpDamage
-      if (event.targetId && units[event.targetId]) units[event.targetId].takenDamage += hpDamage
-      if ((event.payload?.source === 'burn' || event.payload?.source === 'poison') && event.actorId && units[event.actorId]) {
-        units[event.actorId].statusDamageTriggers += 1
-      }
-    }
-
-    if (event.type === 'heal' && event.targetId && units[event.targetId]) {
-      units[event.targetId].healingReceived += Number(event.payload?.healAmount ?? 0)
-    }
-
-    if (event.type === 'apply_status' && event.actorId && units[event.actorId]) {
-      units[event.actorId].statusesApplied += 1
-    }
-  }
-
   return { units }
 }
 
 export const runBattle = (config: BattleConfig): BattleResult => {
-  const history: BattleStateSnapshot[] = []
-  const cardsById = new Map(config.cards.map((card) => [card.id, card]))
-
+  const cardsMap = new Map(config.cards.map((c) => [c.id, c]))
   const state: BattleState = {
-    left: createTeamState(config.left),
-    right: createTeamState(config.right),
+    left: createTeam(config.left, cardsMap),
+    right: createTeam(config.right, cardsMap),
     turn: null,
     logs: [],
     events: [],
     nextStepIndex: 1,
     currentPhase: 'turn_start',
   }
-
-  const allUnits = [...state.left.units, ...state.right.units]
-  emitEvent(state, 'battle_start', { payload: { leftTeam: state.left.name, rightTeam: state.right.name } })
-  history.push(snapshotBattleState(state))
+  const history: BattleStateSnapshot[] = []
+  emit(state, 'battle_start', { payload: { leftTeam: state.left.name, rightTeam: state.right.name } })
+  history.push(snapshot(state))
 
   let rounds = 0
   while (getLivingUnits(state.left.units).length > 0 && getLivingUnits(state.right.units).length > 0 && rounds < MAX_ROUNDS) {
     rounds += 1
+    const order = [...getLivingUnits(state.left.units), ...getLivingUnits(state.right.units)].sort((a, b) => (b.speed === a.speed ? a.id.localeCompare(b.id) : b.speed - a.speed))
 
-    const turnOrder = getLivingUnits(allUnits).sort((a, b) => (b.speed === a.speed ? a.id.localeCompare(b.id) : b.speed - a.speed))
-
-    for (const actor of turnOrder) {
+    for (const actor of order) {
       if (!actor.alive) continue
       const actorTeam = actor.team === state.left.name ? state.left : state.right
       const enemyTeam = actor.team === state.left.name ? state.right : state.left
-
       state.turn = { round: rounds, actorTeam: actor.team, actorUnitId: actor.id, actorUnitName: actor.name }
 
       setPhase(state, 'turn_start')
-      emitEvent(state, 'turn_start', { actorId: actor.id, payload: { round: rounds, actorTeam: actor.team, actorName: actor.name } })
-      drawCard(actorTeam, cardsById, state, actor.id)
+      emit(state, 'turn_start', { actorId: actor.id })
+      draw(state, actorTeam, cardsMap, actor.id)
 
       setPhase(state, 'before_action')
-      const skip = tickBeforeActionStatuses(state, actor)
+      const skip = tickStatusesBeforeAction(state, actor)
       if (!actor.alive || skip) {
         setPhase(state, 'turn_end')
-        tickTurnEnd(state, actor)
-        history.push(snapshotBattleState(state))
-        if (getLivingUnits(state.left.units).length === 0 || getLivingUnits(state.right.units).length === 0) break
+        recoverResourcesTurnEnd(state, actor, rounds)
+        history.push(snapshot(state))
         continue
       }
 
       setPhase(state, 'action')
       const cardIndex = chooseCardIndex(actor, actorTeam.hand)
-      const chosenCard = cardIndex >= 0 ? actorTeam.hand.splice(cardIndex, 1)[0] : undefined
-      if (chosenCard) {
-        emitEvent(state, 'play_card', { actorId: actor.id, cardId: chosenCard.id, payload: { actorTeam: actor.team, actorName: actor.name, cardName: chosenCard.name } })
-        for (const effect of chosenCard.effects) settleCardEffect(state, actor, enemyTeam, chosenCard, effect)
-        actorTeam.discardPile.push(chosenCard)
-        emitEvent(state, 'discard_card', { actorId: actor.id, cardId: chosenCard.id, payload: { teamName: actorTeam.name, cardName: chosenCard.name } })
+      const card = cardIndex >= 0 ? actorTeam.hand.splice(cardIndex, 1)[0] : undefined
+      if (card) {
+        payCost(state, actor, card)
+        emit(state, 'play_card', { actorId: actor.id, cardId: card.id })
+        for (const effect of card.effects) applyCardEffect(state, actor, actorTeam, enemyTeam, card, effect)
+        actorTeam.discardPile.push(card)
+        emit(state, 'discard_card', { actorId: actor.id, cardId: card.id })
       } else {
-        settleBasicAttack(state, actor, enemyTeam)
+        const target = basicAttackTarget(actor, enemyTeam)
+        if (target) {
+          emit(state, 'basic_attack', { actorId: actor.id, targetId: target.id })
+          const { hpDamage } = applyDamage(target, actor.attack)
+          emit(state, 'deal_damage', { actorId: actor.id, targetId: target.id, payload: { rawDamage: actor.attack, hpDamage, source: 'basic_attack' } })
+          if (!target.alive) emit(state, 'unit_down', { actorId: actor.id, targetId: target.id })
+        }
       }
 
       setPhase(state, 'after_action')
       setPhase(state, 'turn_end')
-      tickTurnEnd(state, actor)
-      history.push(snapshotBattleState(state))
+      recoverResourcesTurnEnd(state, actor, rounds)
+      history.push(snapshot(state))
 
       if (getLivingUnits(state.left.units).length === 0 || getLivingUnits(state.right.units).length === 0) break
     }
   }
 
-  state.turn = null
-  const leftAlive = getLivingUnits(state.left.units).length
-  const rightAlive = getLivingUnits(state.right.units).length
-  const winner = leftAlive >= rightAlive ? state.left.name : state.right.name
-  emitEvent(state, 'battle_end', { payload: { winner } })
-  history.push(snapshotBattleState(state))
-
-  const unitIds = [...config.left.units, ...config.right.units].map((unit) => unit.id)
-  const battleReport = buildBattleReport(state.events, unitIds)
-
-  return { winner, rounds, logs: state.logs, events: state.events, finalState: snapshotBattleState(state), history, battleReport }
+  const winner = getLivingUnits(state.left.units).length >= getLivingUnits(state.right.units).length ? state.left.name : state.right.name
+  emit(state, 'battle_end', { payload: { winner } })
+  history.push(snapshot(state))
+  const ids = [...config.left.units, ...config.right.units].map((u) => u.id)
+  const battleReport = buildBattleReport(state.events, ids)
+  return { winner, rounds, logs: state.logs, events: state.events, finalState: snapshot(state), history, battleReport }
 }

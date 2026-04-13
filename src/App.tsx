@@ -1,24 +1,36 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { battlePresets } from './data/presets'
+import { allBattleCards } from './data/cards'
+import { characterCatalog } from './data/characters'
+import { battlePresets, buildBattleConfigFromPreset } from './data/presets'
 import { runBattle } from './engine/simulator'
-import type { BattleResult } from './engine/types'
+import type { BattleResult, Profession, UnitConfig } from './engine/types'
 import { BattleControls } from './ui/BattleControls'
 import { BattleLogPanel } from './ui/BattleLogPanel'
 import { BattleReportPanel } from './ui/BattleReportPanel'
 import { BattleView } from './ui/BattleView'
-import { PresetSelector } from './ui/PresetSelector'
+import { CardLibraryPage } from './ui/CardLibraryPage'
+import { CharacterPage } from './ui/CharacterPage'
+
+const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
 function App() {
+  const [tab, setTab] = useState<'library' | 'characters' | 'battle'>('library')
+  const [professionFilter, setProfessionFilter] = useState<Profession | 'all'>('all')
   const [selectedPresetId, setSelectedPresetId] = useState(battlePresets[0].id)
+  const [leftCharacters, setLeftCharacters] = useState<UnitConfig[]>(clone(battlePresets[0].leftTeam))
   const [battleResult, setBattleResult] = useState<BattleResult | null>(null)
   const [step, setStep] = useState(0)
   const [isAutoplay, setIsAutoplay] = useState(false)
 
-  const selectedPreset = useMemo(
-    () => battlePresets.find((preset) => preset.id === selectedPresetId) ?? battlePresets[0],
-    [selectedPresetId],
-  )
+  const selectedPreset = useMemo(() => battlePresets.find((p) => p.id === selectedPresetId) ?? battlePresets[0], [selectedPresetId])
+
+  useEffect(() => {
+    setLeftCharacters(clone(selectedPreset.leftTeam))
+    setBattleResult(null)
+    setStep(0)
+    setIsAutoplay(false)
+  }, [selectedPresetId])
 
   useEffect(() => {
     if (!isAutoplay || !battleResult) return
@@ -32,13 +44,12 @@ function App() {
         return current + 1
       })
     }, 600)
-
     return () => window.clearInterval(timer)
   }, [isAutoplay, battleResult])
 
   const startBattle = () => {
-    const result = runBattle(selectedPreset.config)
-    setBattleResult(result)
+    const config = buildBattleConfigFromPreset({ ...selectedPreset, leftTeam: leftCharacters })
+    setBattleResult(runBattle(config))
     setStep(0)
     setIsAutoplay(false)
   }
@@ -51,54 +62,91 @@ function App() {
 
   const maxStep = battleResult ? battleResult.history.length - 1 : 0
   const currentSnapshot = battleResult?.history[Math.min(step, maxStep)]
-  const currentEvent = battleResult?.events[Math.min(step, battleResult.events.length - 1)]
+  const currentEvent = battleResult?.events[Math.min(step, Math.max(0, battleResult.events.length - 1))]
   const isEnded = battleResult ? step >= maxStep : false
 
   return (
     <main>
-      <h1>自动对战卡牌 MVP</h1>
+      <h1>3v3 职业卡牌战斗原型</h1>
 
-      <PresetSelector
-        presets={battlePresets}
-        selectedId={selectedPresetId}
-        onChange={setSelectedPresetId}
-        disabled={Boolean(battleResult)}
-      />
+      <div className="tab-bar">
+        <button onClick={() => setTab('library')}>牌库页</button>
+        <button onClick={() => setTab('characters')}>角色页</button>
+        <button onClick={() => setTab('battle')}>战斗页</button>
+      </div>
 
-      <BattleControls
-        started={Boolean(battleResult)}
-        canPrev={step > 0}
-        canNext={Boolean(battleResult) && step < maxStep}
-        isAutoplay={isAutoplay}
-        onStart={startBattle}
-        onPrev={() => setStep((v) => Math.max(v - 1, 0))}
-        onNext={() => setStep((v) => Math.min(v + 1, maxStep))}
-        onToggleAutoplay={() => setIsAutoplay((v) => !v)}
-        onReset={resetBattle}
-        onJumpEnd={() => setStep(maxStep)}
-      />
+      {tab === 'library' ? (
+        <CardLibraryPage cards={allBattleCards} professionFilter={professionFilter} onProfessionFilterChange={setProfessionFilter} />
+      ) : null}
 
-      {battleResult && currentSnapshot ? (
+      {tab === 'characters' ? (
+        <CharacterPage
+          characters={leftCharacters}
+          allCards={allBattleCards}
+          onUpdateCharacter={(next) =>
+            setLeftCharacters((list) => list.map((c) => (c.id === next.id ? next : c)))
+          }
+        />
+      ) : null}
+
+      {tab === 'battle' ? (
         <>
-          <BattleView
-            snapshot={currentSnapshot}
-            currentEvent={currentEvent}
-            step={step}
-            totalSteps={battleResult.history.length}
-            winner={isEnded ? battleResult.winner : undefined}
+          <section>
+            <h2>战前配置</h2>
+            <label>
+              预设：
+              <select value={selectedPresetId} onChange={(e) => setSelectedPresetId(e.target.value)}>
+                {battlePresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p>{selectedPreset.description}</p>
+          </section>
+
+          <BattleControls
+            started={Boolean(battleResult)}
+            canPrev={step > 0}
+            canNext={Boolean(battleResult) && step < maxStep}
+            isAutoplay={isAutoplay}
+            onStart={startBattle}
+            onPrev={() => setStep((v) => Math.max(v - 1, 0))}
+            onNext={() => setStep((v) => Math.min(v + 1, maxStep))}
+            onToggleAutoplay={() => setIsAutoplay((v) => !v)}
+            onReset={resetBattle}
+            onJumpEnd={() => setStep(maxStep)}
           />
-          <BattleLogPanel logs={battleResult.logs} events={battleResult.events} step={step} />
-          {isEnded ? (
-            <BattleReportPanel
-              winner={battleResult.winner}
-              rounds={battleResult.rounds}
-              report={battleResult.battleReport}
-            />
-          ) : null}
+
+          {battleResult && currentSnapshot ? (
+            <>
+              <BattleView
+                snapshot={currentSnapshot}
+                currentEvent={currentEvent}
+                step={step}
+                totalSteps={battleResult.history.length}
+                winner={isEnded ? battleResult.winner : undefined}
+              />
+              <BattleLogPanel logs={battleResult.logs} events={battleResult.events} step={step} />
+              {isEnded ? <BattleReportPanel winner={battleResult.winner} rounds={battleResult.rounds} report={battleResult.battleReport} /> : null}
+            </>
+          ) : (
+            <p>请先开始战斗。</p>
+          )}
         </>
-      ) : (
-        <p>请选择预设并点击“开始战斗”。</p>
-      )}
+      ) : null}
+
+      <section>
+        <h2>可用角色目录（只读）</h2>
+        <ul>
+          {characterCatalog.map((c) => (
+            <li key={c.id}>
+              {c.name} / {c.profession} / {c.position}
+            </li>
+          ))}
+        </ul>
+      </section>
     </main>
   )
 }

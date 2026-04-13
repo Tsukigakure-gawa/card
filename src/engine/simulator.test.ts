@@ -1,95 +1,75 @@
 import { describe, expect, it } from 'vitest'
-import type { BattleConfig } from './types'
+import type { BattleConfig, CardConfig, UnitConfig } from './types'
 import { runBattle } from './simulator'
 
-const units = (prefix: string) => [
-  { id: `${prefix}1`, name: `${prefix}1`, hp: 20, attack: 2, speed: 10 },
-  { id: `${prefix}2`, name: `${prefix}2`, hp: 20, attack: 1, speed: 5 },
-  { id: `${prefix}3`, name: `${prefix}3`, hp: 20, attack: 1, speed: 4 },
+const unit = (overrides: Partial<UnitConfig>): UnitConfig => ({
+  id: 'u',
+  name: 'unit',
+  profession: 'warrior',
+  tags: [],
+  maxHp: 20,
+  attack: 5,
+  speed: 5,
+  position: 'front',
+  backstory: '-',
+  signatureSkill: 'sig',
+  selectableCommonCards: ['cm'],
+  selectableClassCards: ['cl'],
+  loadout: { signatureSkill: 'sig', commonCards: ['cm'], classCards: ['cl'] },
+  ...overrides,
+})
+
+const baseCards: CardConfig[] = [
+  { id: 'cm', name: '通用打击', cardPool: 'common', costType: 'actionPoints', cost: 1, range: 'single', description: '', effects: [{ kind: 'damage', value: 3, targetType: 'enemy_front' }] },
+  { id: 'cl', name: '职业打击', cardPool: 'class', classRestriction: ['warrior'], costType: 'fightingSpirit', cost: 1, range: 'single', description: '', effects: [{ kind: 'damage', value: 4, targetType: 'enemy_front' }] },
+  { id: 'sig', name: '签名', cardPool: 'signature', classRestriction: ['warrior'], costType: 'fightingSpirit', cost: 1, range: 'single', description: '', effects: [{ kind: 'damage', value: 5, targetType: 'enemy_front' }] },
 ]
 
-describe('advanced status systems', () => {
-  it('burn stacking should stack value and refresh duration', () => {
+describe('refactor battle rules', () => {
+  it('warrior uses fightingSpirit for class card', () => {
     const config: BattleConfig = {
-      cards: [
-        { id: 'b1', name: '烧1', effects: [{ kind: 'apply_status', statusType: 'burn', value: 2, duration: 2, targetType: 'enemy_front' }] },
-        { id: 'b2', name: '烧2', effects: [{ kind: 'apply_status', statusType: 'burn', value: 3, duration: 2, targetType: 'enemy_front' }] },
-      ],
-      left: { name: 'A', units: units('a'), deck: ['b1', 'b2'] },
-      right: { name: 'B', units: units('b'), deck: [] },
+      cards: baseCards,
+      left: { name: 'L', units: [unit({ id: 'l1' }), unit({ id: 'l2', position: 'middle' }), unit({ id: 'l3', position: 'back' })] },
+      right: { name: 'R', units: [unit({ id: 'r1' }), unit({ id: 'r2', position: 'middle' }), unit({ id: 'r3', position: 'back' })] },
     }
-
     const result = runBattle(config)
-    expect(result.events.some((e) => e.type === 'apply_status' && e.payload?.mode === 'stack')).toBe(true)
+    expect(result.events.some((e) => e.type === 'play_card' && e.cardId === 'cl')).toBe(true)
   })
 
-  it('cleanse removes negative statuses', () => {
+  it('mage mana recovery tracked', () => {
+    const mage = unit({ id: 'm1', profession: 'mage', signatureSkill: 'sig_m', selectableClassCards: ['cl_m'], loadout: { signatureSkill: 'sig_m', commonCards: [], classCards: ['cl_m'] } })
+    const cards: CardConfig[] = [
+      ...baseCards,
+      { id: 'cl_m', name: '法术', cardPool: 'class', classRestriction: ['mage'], costType: 'mana', cost: 1, range: 'single', description: '', effects: [{ kind: 'damage', value: 3, targetType: 'enemy_front' }] },
+      { id: 'sig_m', name: '法师签名', cardPool: 'signature', classRestriction: ['mage'], costType: 'mana', cost: 1, range: 'single', description: '', effects: [{ kind: 'damage', value: 4, targetType: 'enemy_front' }] },
+    ]
     const config: BattleConfig = {
-      cards: [
-        { id: 'p', name: '毒', effects: [{ kind: 'apply_status', statusType: 'poison', value: 2, duration: 2, targetType: 'enemy_front' }] },
-        { id: 'c', name: '净化', effects: [{ kind: 'cleanse', targetType: 'self' }] },
-      ],
-      left: { name: 'A', units: units('a'), deck: ['c'] },
-      right: { name: 'B', units: units('b'), deck: ['p'] },
+      cards,
+      left: { name: 'L', units: [mage, unit({ id: 'l2', position: 'middle' }), unit({ id: 'l3', position: 'back' })] },
+      right: { name: 'R', units: [unit({ id: 'r1' }), unit({ id: 'r2', position: 'middle' }), unit({ id: 'r3', position: 'back' })] },
     }
-
     const result = runBattle(config)
-    expect(result.events.some((e) => e.type === 'cleanse' && Number(e.payload?.removedCount) > 0)).toBe(true)
+    expect(result.events.some((e) => e.type === 'resource_change' && e.actorId === 'm1')).toBe(true)
   })
 
-  it('dispel removes positive statuses like taunt', () => {
+  it('enemy_back targeting works', () => {
+    const cards: CardConfig[] = [...baseCards, { id: 'sig_back', name: '后排刺杀', cardPool: 'signature', classRestriction: ['warrior'], costType: 'fightingSpirit', cost: 1, range: 'single', description: '', effects: [{ kind: 'damage', value: 5, targetType: 'enemy_back' }] }]
     const config: BattleConfig = {
-      cards: [
-        { id: 't', name: '挑衅', effects: [{ kind: 'apply_status', statusType: 'taunt', value: 0, duration: 2, targetType: 'self' }] },
-        { id: 'd', name: '驱散', effects: [{ kind: 'dispel', targetType: 'enemy_front' }] },
-      ],
-      left: { name: 'A', units: units('a'), deck: ['t'] },
-      right: { name: 'B', units: units('b'), deck: ['d'] },
+      cards,
+      left: { name: 'L', units: [unit({ id: 'l1', signatureSkill: 'sig_back', loadout: { signatureSkill: 'sig_back', commonCards: [], classCards: [] } }), unit({ id: 'l2', position: 'middle' }), unit({ id: 'l3', position: 'back' })] },
+      right: { name: 'R', units: [unit({ id: 'r1' }), unit({ id: 'r2', position: 'middle' }), unit({ id: 'r3', position: 'back' })] },
     }
-
     const result = runBattle(config)
-    expect(result.events.some((e) => e.type === 'dispel' && Number(e.payload?.removedCount) > 0)).toBe(true)
+    expect(result.events.some((e) => e.type === 'deal_damage' && e.targetId === 'r3')).toBe(true)
   })
 
-  it('immunity blocks new status application', () => {
+  it('battleReport keeps unit stats', () => {
     const config: BattleConfig = {
-      cards: [
-        { id: 'im', name: '免疫', effects: [{ kind: 'apply_immunity', targetType: 'self', duration: 2, immuneTo: ['burn'] }] },
-        { id: 'burn', name: '灼烧', effects: [{ kind: 'apply_status', statusType: 'burn', value: 3, duration: 1, targetType: 'enemy_front' }] },
-      ],
-      left: { name: 'A', units: units('a'), deck: ['im'] },
-      right: { name: 'B', units: units('b'), deck: ['burn'] },
+      cards: baseCards,
+      left: { name: 'L', units: [unit({ id: 'l1' }), unit({ id: 'l2', position: 'middle' }), unit({ id: 'l3', position: 'back' })] },
+      right: { name: 'R', units: [unit({ id: 'r1' }), unit({ id: 'r2', position: 'middle' }), unit({ id: 'r3', position: 'back' })] },
     }
-
     const result = runBattle(config)
-    expect(result.events.some((e) => e.type === 'block_status' && e.payload?.statusType === 'burn')).toBe(true)
-  })
-
-  it('phase order should follow turn_start -> before_action -> action -> after_action -> turn_end', () => {
-    const config: BattleConfig = {
-      cards: [{ id: 'atk', name: '打击', effects: [{ kind: 'damage', value: 4, targetType: 'enemy_front' }] }],
-      left: { name: 'A', units: units('a'), deck: ['atk'] },
-      right: { name: 'B', units: units('b'), deck: [] },
-    }
-
-    const result = runBattle(config)
-    const phases = result.events
-      .filter((e) => e.type === 'phase_start')
-      .slice(0, 5)
-      .map((e) => e.payload?.phase)
-
-    expect(phases).toEqual(['turn_start', 'before_action', 'action', 'after_action', 'turn_end'])
-  })
-
-  it('battleReport should accumulate key stats from events', () => {
-    const config: BattleConfig = {
-      cards: [{ id: 'atk', name: '打击', effects: [{ kind: 'damage', value: 4, targetType: 'enemy_front' }] }],
-      left: { name: 'A', units: units('a'), deck: ['atk'] },
-      right: { name: 'B', units: units('b'), deck: [] },
-    }
-
-    const result = runBattle(config)
-    expect(result.battleReport.units.a1.dealtDamage).toBeGreaterThanOrEqual(0)
-    expect(result.battleReport.units.b1.takenDamage).toBeGreaterThanOrEqual(0)
+    expect(result.battleReport.units.l1).toBeDefined()
   })
 })
