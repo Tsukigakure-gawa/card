@@ -1,10 +1,12 @@
 export type CardType = 'damage' | 'shield'
+export type CardTargetType = 'self' | 'enemy_front' | 'enemy_lowest_hp'
 
 export type CardConfig = {
   id: string
   name: string
   type: CardType
   value: number
+  targetType: CardTargetType
 }
 
 export type UnitConfig = {
@@ -61,10 +63,32 @@ export type BattleStateSnapshot = {
   logs: string[]
 }
 
+export type BattleEventType =
+  | 'battle_start'
+  | 'turn_start'
+  | 'draw_card'
+  | 'recycle_discard'
+  | 'play_card'
+  | 'basic_attack'
+  | 'gain_shield'
+  | 'deal_damage'
+  | 'unit_down'
+  | 'battle_end'
+
+export type BattleEvent = {
+  type: BattleEventType
+  stepIndex: number
+  actorId?: string
+  targetId?: string
+  cardId?: string
+  payload?: Record<string, number | string | boolean>
+}
+
 export type BattleResult = {
   winner: string
   rounds: number
   logs: string[]
+  events: BattleEvent[]
   finalState: BattleStateSnapshot
   history: BattleStateSnapshot[]
 }
