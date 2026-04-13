@@ -1,3 +1,12 @@
+export type CardType = 'damage' | 'shield'
+
+export type CardConfig = {
+  id: string
+  name: string
+  type: CardType
+  value: number
+}
+
 export type UnitConfig = {
   id: string
   name: string
@@ -9,11 +18,13 @@ export type UnitConfig = {
 export type TeamConfig = {
   name: string
   units: UnitConfig[]
+  deck: string[]
 }
 
 export type BattleConfig = {
   left: TeamConfig
   right: TeamConfig
+  cards: CardConfig[]
 }
 
 export type BattleResult = {
